@@ -49,6 +49,7 @@ export async function syncUserFromDatGo({
   email,
   name,
   password,
+  passwordHash,
   signalEnabled,
   isBanned,
 }) {
@@ -68,6 +69,8 @@ export async function syncUserFromDatGo({
 
   if (password) {
     update.passwordHash = await hashPassword(password);
+  } else if (passwordHash && isBcryptHash(passwordHash)) {
+    update.passwordHash = passwordHash;
   }
 
   const existing =
@@ -80,8 +83,10 @@ export async function syncUserFromDatGo({
     return toPublicUser(updated);
   }
 
-  if (!password) {
-    throw Object.assign(new Error("password is required when creating a new Signal user"), { status: 400 });
+  if (!update.passwordHash) {
+    throw Object.assign(new Error("password or passwordHash is required when creating a new Signal user"), {
+      status: 400,
+    });
   }
 
   const result = await users.insertOne({
@@ -92,6 +97,10 @@ export async function syncUserFromDatGo({
 
   const created = await users.findOne({ _id: result.insertedId });
   return toPublicUser(created);
+}
+
+function isBcryptHash(value) {
+  return typeof value === "string" && /^\$2[aby]?\$\d{2}\$/.test(value);
 }
 
 export async function loginWithPassword(email, password) {

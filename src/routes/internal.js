@@ -8,7 +8,7 @@ router.use(requireInternalKey);
 
 router.post("/users/sync", async (req, res, next) => {
   try {
-    const { datGoUserId, email, name, password, signalEnabled, isBanned } = req.body ?? {};
+    const { datGoUserId, email, name, password, passwordHash, signalEnabled, isBanned } = req.body ?? {};
 
     if (!datGoUserId || !email) {
       return res.status(400).json({ message: "datGoUserId and email are required" });
@@ -19,6 +19,7 @@ router.post("/users/sync", async (req, res, next) => {
       email: String(email),
       name: name ? String(name) : undefined,
       password: password ? String(password) : undefined,
+      passwordHash: passwordHash ? String(passwordHash) : undefined,
       signalEnabled: signalEnabled === true,
       isBanned: isBanned === true,
     });

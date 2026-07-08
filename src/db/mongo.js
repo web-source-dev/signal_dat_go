@@ -1,4 +1,5 @@
 import { MongoClient } from "mongodb";
+import { ensureIndexes } from "../services/connectedAccounts.js";
 
 let client = null;
 let db = null;
@@ -10,6 +11,7 @@ export async function connectDb() {
   client = new MongoClient(uri);
   await client.connect();
   db = client.db();
+  await ensureIndexes();
   console.log("[cargosignal-api] connected to MongoDB");
   return db;
 }

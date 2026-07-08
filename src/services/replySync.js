@@ -26,75 +26,104 @@ async function ingestReplies(thread, replies) {
 }
 
 export async function syncGmailRepliesForUser(userId) {
-  const tokens = await connectedAccounts.getValidGmailTokens(userId);
-  if (!tokens) return { recorded: 0, error: null };
+  const accounts = await connectedAccounts.listAccountsByProvider(userId, "GMAIL");
+  if (accounts.length === 0) return { recorded: 0, error: null };
 
   const threads = await listThreadsForProvider(userId, "GMAIL");
   let recorded = 0;
-  for (const thread of threads) {
-    if (!thread.providerThreadId || !thread.brokerEmail) continue;
-    const replies = await gmail.getBrokerRepliesInThread(
-      tokens.accessToken,
-      thread.providerThreadId,
-      thread.brokerEmail
-    );
-    recorded += await ingestReplies(thread, replies);
+  let lastError = null;
+
+  for (const account of accounts) {
+    const accountId = String(account._id);
+    const tokens = await connectedAccounts.getValidGmailTokens(userId, null, accountId).catch((error) => {
+      lastError = error instanceof Error ? error.message : "Gmail sync failed";
+      return null;
+    });
+    if (!tokens) continue;
+
+    for (const thread of threads) {
+      if (!thread.providerThreadId || !thread.brokerEmail) continue;
+      if (thread.connectedAccountId && thread.connectedAccountId !== accountId) continue;
+      const replies = await gmail.getBrokerRepliesInThread(
+        tokens.accessToken,
+        thread.providerThreadId,
+        thread.brokerEmail
+      );
+      recorded += await ingestReplies(thread, replies);
+    }
   }
-  return { recorded, error: null };
+
+  return { recorded, error: lastError };
 }
 
 export async function syncOutlookRepliesForUser(userId) {
-  const tokens = await connectedAccounts.getDecryptedTokens(userId, "OUTLOOK");
-  if (!tokens) return { recorded: 0, error: null };
+  const accounts = await connectedAccounts.listAccountsByProvider(userId, "OUTLOOK");
+  if (accounts.length === 0) return { recorded: 0, error: null };
 
   const threads = await listThreadsForProvider(userId, "OUTLOOK");
   let recorded = 0;
-  for (const thread of threads) {
-    if (!thread.providerThreadId || !thread.brokerEmail) continue;
-    const replies = await outlook.getBrokerRepliesInConversation(
-      tokens.accessToken,
-      tokens.refreshToken,
-      thread.providerThreadId,
-      thread.brokerEmail
-    );
-    recorded += await ingestReplies(thread, replies);
+  let lastError = null;
+
+  for (const account of accounts) {
+    const accountId = String(account._id);
+    const tokens = await connectedAccounts.getDecryptedTokensForAccount(userId, accountId);
+    if (!tokens) continue;
+
+    for (const thread of threads) {
+      if (!thread.providerThreadId || !thread.brokerEmail) continue;
+      if (thread.connectedAccountId && thread.connectedAccountId !== accountId) continue;
+      const replies = await outlook.getBrokerRepliesInConversation(
+        tokens.accessToken,
+        tokens.refreshToken,
+        thread.providerThreadId,
+        thread.brokerEmail
+      );
+      recorded += await ingestReplies(thread, replies);
+    }
   }
-  return { recorded, error: null };
+
+  return { recorded, error: lastError };
 }
 
 export async function syncSmtpRepliesForUser(userId) {
-  const config = await connectedAccounts.getSmtpConfig(userId);
-  if (!config) return { recorded: 0, error: null };
+  const accounts = await connectedAccounts.listAccountsByProvider(userId, "SMTP");
+  if (accounts.length === 0) return { recorded: 0, error: null };
 
   const threads = await listThreadsForProvider(userId, "SMTP");
   let recorded = 0;
+  let lastError = null;
 
-  try {
-    for (const thread of threads) {
-      if (!thread.brokerEmail) continue;
-      const sentMessageIds = (thread.sentEmails ?? [])
-        .map((row) => row.providerMessageId)
-        .filter(Boolean);
-      const since = thread.createdAt ? new Date(thread.createdAt) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const replies = await getSmtpBrokerReplies(config, {
-        brokerEmail: thread.brokerEmail,
-        subject: thread.subject,
-        since,
-        sentMessageIds,
-        mailboxEmail: config.email,
-      });
-      recorded += await ingestReplies(thread, replies);
-    }
-    return { recorded, error: null };
-  } catch (error) {
-    return {
-      recorded,
-      error:
+  for (const account of accounts) {
+    const accountId = String(account._id);
+    const config = await connectedAccounts.getSmtpConfig(userId, accountId);
+    if (!config) continue;
+
+    try {
+      for (const thread of threads) {
+        if (!thread.brokerEmail) continue;
+        if (thread.connectedAccountId && thread.connectedAccountId !== accountId) continue;
+        const sentMessageIds = (thread.sentEmails ?? [])
+          .map((row) => row.providerMessageId)
+          .filter(Boolean);
+        const since = thread.createdAt ? new Date(thread.createdAt) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const replies = await getSmtpBrokerReplies(config, {
+          brokerEmail: thread.brokerEmail,
+          subject: thread.subject,
+          since,
+          sentMessageIds,
+          mailboxEmail: config.email,
+        });
+        recorded += await ingestReplies(thread, replies);
+      }
+    } catch (error) {
+      lastError =
         error instanceof Error
           ? `SMTP inbox sync failed (${config.imapHost ?? config.smtpHost}): ${error.message}. Enable IMAP in your mailbox settings and reconnect SMTP.`
-          : "SMTP inbox sync failed",
-    };
+          : "SMTP inbox sync failed";
+    }
   }
+
+  return { recorded, error: lastError };
 }
 
 export async function syncAllRepliesForUser(userId) {

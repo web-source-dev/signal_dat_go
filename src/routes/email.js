@@ -61,9 +61,9 @@ router.get("/oauth/outlook/callback", requireSession, async (req, res, next) => 
         graphSubscriptionId: subscription.id,
         graphSubscriptionExpiresAt: subscription.expirationDateTime,
         graphClientState: clientState,
-      });
+      }, email);
     } catch (error) {
-      await connectedAccounts.recordError(req.user.id, "OUTLOOK", error.message);
+      await connectedAccounts.recordError(req.user.id, "OUTLOOK", error.message, email);
     }
 
     res.type("html").send(successPage("Outlook", email));
@@ -113,8 +113,14 @@ router.post("/smtp/connect", requireSession, async (req, res, next) => {
       imapSecure: imapSettings?.imapSecure !== false,
     });
 
+    const accounts = await connectedAccounts.listForUser(req.user.id);
+    const account = accounts.find(
+      (row) => row.provider === "SMTP" && row.email?.toLowerCase() === email.toLowerCase()
+    );
+
     res.json({
       provider: "SMTP",
+      id: account?.id,
       email,
       status: "ACTIVE",
       imapVerified,
@@ -130,12 +136,50 @@ router.post("/smtp/connect", requireSession, async (req, res, next) => {
 
 router.delete("/smtp/disconnect", requireSession, async (req, res, next) => {
   try {
+    const accountId = req.body?.accountId ? String(req.body.accountId) : null;
+    if (accountId) {
+      const disconnected = await connectedAccounts.disconnectAccount(req.user.id, accountId);
+      if (!disconnected) {
+        return res.status(404).json({ message: "Connected account not found" });
+      }
+      return res.json({ disconnected: true });
+    }
+
     await connectedAccounts.disconnectProvider(req.user.id, "SMTP");
     res.json({ disconnected: true });
   } catch (error) {
     next(error);
   }
 });
+
+async function resolveSendAccount(userId, body) {
+  const accountId = body.accountId ? String(body.accountId) : null;
+  if (accountId) {
+    const account = await connectedAccounts.getAccountById(userId, accountId);
+    if (!account || account.status === "ERROR") {
+      const err = new Error("Selected mailbox is not connected");
+      err.status = 400;
+      throw err;
+    }
+    return account;
+  }
+
+  const { getEmailPreferences } = await import("../services/emailPreferences.js");
+  const prefs = await getEmailPreferences(userId);
+  if (prefs.defaultEmailAccountId) {
+    const account = await connectedAccounts.getAccountById(userId, prefs.defaultEmailAccountId);
+    if (account && account.status !== "ERROR") return account;
+  }
+
+  const provider = body.provider === "SMTP" ? "SMTP" : body.provider === "OUTLOOK" ? "OUTLOOK" : "GMAIL";
+  const tokens = await connectedAccounts.getDecryptedTokens(userId, provider);
+  if (!tokens?.accountId) {
+    const err = new Error(`No connected ${provider} account — connect a mailbox in Account first`);
+    err.status = 400;
+    throw err;
+  }
+  return connectedAccounts.getAccountById(userId, tokens.accountId);
+}
 
 router.post("/send", requireSession, async (req, res, next) => {
   try {
@@ -144,11 +188,12 @@ router.post("/send", requireSession, async (req, res, next) => {
       return res.status(400).json({ message: "to, subject, and bodyHtml are required" });
     }
 
-    const provider = body.provider === "SMTP" ? "SMTP" : body.provider === "OUTLOOK" ? "OUTLOOK" : "GMAIL";
+    const account = await resolveSendAccount(req.user.id, body);
+    const provider = account.provider;
     let result;
 
     if (provider === "SMTP") {
-      const config = await connectedAccounts.getSmtpConfig(req.user.id);
+      const config = await connectedAccounts.getSmtpConfig(req.user.id, String(account._id));
       if (!config) {
         return res.status(400).json({
           message: "No SMTP account connected — connect your mailbox manually in Account first",
@@ -163,8 +208,8 @@ router.post("/send", requireSession, async (req, res, next) => {
     } else {
       const tokens =
         provider === "GMAIL"
-          ? await connectedAccounts.getValidGmailTokens(req.user.id)
-          : await connectedAccounts.getDecryptedTokens(req.user.id, provider);
+          ? await connectedAccounts.getValidGmailTokens(req.user.id, null, String(account._id))
+          : await connectedAccounts.getDecryptedTokensForAccount(req.user.id, String(account._id));
       if (!tokens) {
         return res.status(400).json({
           message: `No connected ${provider} account — connect Gmail or Outlook in Account first`,
@@ -181,6 +226,7 @@ router.post("/send", requireSession, async (req, res, next) => {
       loadRef: body.loadRef ?? null,
       outreachThreadId: body.outreachThreadId ?? null,
       provider,
+      connectedAccountId: String(account._id),
       providerThreadId: result.providerThreadId,
       providerMessageId: result.providerMessageId,
       subject: body.subject,

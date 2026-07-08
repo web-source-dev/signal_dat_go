@@ -41,9 +41,9 @@ export async function completeGmailOAuth(req, res, next) {
 
     try {
       const historyId = await gmail.watchGmailMailbox(tokens.accessToken);
-      await connectedAccounts.setProviderMetadata(req.user.id, "GMAIL", { gmailHistoryId: historyId });
+      await connectedAccounts.setProviderMetadata(req.user.id, "GMAIL", { gmailHistoryId: historyId }, email);
     } catch (error) {
-      await connectedAccounts.recordError(req.user.id, "GMAIL", error.message);
+      await connectedAccounts.recordError(req.user.id, "GMAIL", error.message, email);
     }
 
     res.type("html").send(successPage(email));

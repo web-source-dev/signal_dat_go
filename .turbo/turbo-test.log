@@ -1,0 +1,19 @@
+
+> @cargosignal/api@0.0.1 test F:\Projects\Extensions\DAT\cargosignal\apps\api
+> vitest run
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mF:/Projects/Extensions/DAT/cargosignal/apps/api[39m
+
+ [32m✓[39m src/broker-insights/fmcsa.client.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m src/broker-insights/broker-insights.service.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m src/crypto/token-cipher.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m✓[39m src/health/health.controller.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m src/email/gmail.service.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[32m17 passed[39m[22m[90m (17)[39m
+[2m   Start at [22m 14:31:49
+[2m   Duration [22m 9.72s[2m (transform 444ms, setup 0ms, collect 15.66s, tests 56ms, environment 2ms, prepare 2.93s)[22m
+

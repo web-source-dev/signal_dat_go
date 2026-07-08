@@ -1,0 +1,24 @@
+{
+  "name": "@cargosignal/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "imapflow": "^1.4.6",
+    "mailparser": "^3.9.14",
+    "mongodb": "^7.4.0",
+    "nodemailer": "^9.0.3",
+    "undici": "^7.16.0",
+    "whois": "^2.16.2"
+  }
+}

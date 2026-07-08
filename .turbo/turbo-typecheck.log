@@ -1,0 +1,4 @@
+
+> @cargosignal/api@0.0.1 typecheck F:\Projects\Extensions\DAT\cargosignal\apps\api
+> tsc --noEmit
+

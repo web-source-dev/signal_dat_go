@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Provider {
+  DAT
+  TQL
+  JB_HUNT
+  LANDSTAR
+  GMAIL
+  OUTLOOK
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  NEEDS_REAUTH
+  ERROR
+  DISABLED
+}
+
+enum LoadStatus {
+  ACTIVE
+  EXPIRED
+  BOOKED
+  REMOVED
+}
+
+enum OutreachStatus {
+  SENT
+  REPLIED
+  NO_RESPONSE
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String?
+  name            String?
+  plan            String   @default("free")
+  stripeCustomerId String?
+  createdAt       DateTime @default(now())
+  deletedAt       DateTime?
+
+  sessions          Session[]
+  connectedAccounts ConnectedAccount[]
+  loadPostings      LoadPosting[]
+  savedSearches     SavedSearch[]
+  matchAlerts       MatchAlert[]
+  outreachThreads   OutreachThread[]
+  analyticsEvents   AnalyticsEvent[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+/// One row per (user, provider) integration. Tokens are encrypted at the
+/// application layer before being written here — see apps/api/src/auth.
+model ConnectedAccount {
+  id                    String            @id @default(uuid())
+  userId                String
+  provider              Provider
+  status                ConnectionStatus  @default(ACTIVE)
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  scope                 String?
+  pollingIntervalSeconds Int?
+  lastSyncedAt          DateTime?
+  lastError             String?
+  /// The connected mailbox's own address (GMAIL/OUTLOOK only) — needed to
+  /// route an incoming Pub/Sub/Graph webhook notification back to a user.
+  providerAccountEmail  String?
+  /// Provider-specific durable state: Gmail's last-seen historyId for
+  /// users.history.list, or Outlook's Graph subscription id + expiration.
+  providerMetadata      Json?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([provider, providerAccountEmail])
+  @@map("connected_accounts")
+}
+
+/// Normalized across all source boards; raw_payload keeps unmapped
+/// source-specific fields without forcing a rigid shared schema.
+model LoadPosting {
+  id             String     @id @default(uuid())
+  userId         String
+  sourceProvider Provider
+  sourceLoadId   String
+  originCity     String?
+  originState    String?
+  destCity       String?
+  destState      String?
+  pickupDate     DateTime?
+  equipmentType  String?
+  weightLbs      Float?
+  rateTotal      Float?
+  ratePerMile    Float?
+  miles          Float?
+  brokerName     String?
+  brokerMcNumber String?
+  brokerPhone    String?
+  brokerEmail    String?
+  rawPayload     Json?
+  status         LoadStatus @default(ACTIVE)
+  firstSeenAt    DateTime   @default(now())
+  lastSeenAt     DateTime   @default(now())
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchAlerts MatchAlert[]
+
+  @@unique([userId, sourceProvider, sourceLoadId])
+  @@map("load_postings")
+}
+
+model SavedSearch {
+  id           String   @id @default(uuid())
+  userId       String
+  name         String
+  filters      Json
+  alertEnabled Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchAlerts MatchAlert[]
+
+  @@map("saved_searches")
+}
+
+model MatchAlert {
+  id            String    @id @default(uuid())
+  userId        String
+  loadPostingId String
+  savedSearchId String
+  matchedAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+  channel       String?
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loadPosting LoadPosting @relation(fields: [loadPostingId], references: [id], onDelete: Cascade)
+  savedSearch SavedSearch @relation(fields: [savedSearchId], references: [id], onDelete: Cascade)
+
+  @@map("match_alerts")
+}
+
+model OutreachThread {
+  id               String         @id @default(uuid())
+  userId           String
+  loadRef          String?
+  provider         Provider
+  providerThreadId String
+  subject          String
+  brokerEmail      String
+  status           OutreachStatus @default(SENT)
+  createdAt        DateTime       @default(now())
+  lastActivityAt   DateTime       @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentEmails SentEmail[]
+  replies    EmailReply[]
+
+  @@unique([userId, provider, providerThreadId])
+  @@map("email_threads")
+}
+
+model SentEmail {
+  id                 String   @id @default(uuid())
+  outreachThreadId   String
+  providerMessageId  String
+  bodySnippet        String
+  aiGenerated        Boolean  @default(false)
+  sentAt             DateTime @default(now())
+
+  outreachThread OutreachThread @relation(fields: [outreachThreadId], references: [id], onDelete: Cascade)
+
+  @@map("sent_emails")
+}
+
+model EmailReply {
+  id                String   @id @default(uuid())
+  outreachThreadId  String
+  providerMessageId String
+  fromAddress       String
+  snippet           String
+  receivedAt        DateTime @default(now())
+
+  outreachThread OutreachThread @relation(fields: [outreachThreadId], references: [id], onDelete: Cascade)
+
+  @@map("email_replies")
+}
+
+/// Keyed globally by MC number (NOT per-user) — the single biggest lever for
+/// controlling paid third-party lookup costs, since many users will look up
+/// the same broker. Independent *_fetched_at columns let each paid source
+/// have its own refresh cadence.
+model BrokerProfile {
+  id                 String    @id @default(uuid())
+  mcNumber           String    @unique
+  dotNumber          String?
+  fmcsaData          Json?
+  fmcsaFetchedAt     DateTime?
+  paymentRiskGrade   String?
+  paymentRiskData    Json?
+  paymentRiskFetchedAt DateTime?
+  phoneReputation    Json?
+  phoneFetchedAt     DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("broker_profiles")
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  eventType String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("analytics_events")
+}

@@ -12,9 +12,14 @@ function toNumberOrNull(value) {
 
 function normalizeFilter(raw, userId) {
   if (!raw || typeof raw !== "object") return null;
-  const id = String(raw.id ?? "").trim();
-  const label = String(raw.label ?? "").trim();
-  if (!id || !label) return null;
+
+  // Accept either `id` or `filterId` from clients.
+  const id = String(raw.id ?? raw.filterId ?? "").trim();
+  const label = String(raw.label ?? raw.name ?? "").trim();
+  if (!id || !label) {
+    console.warn("[savedFilters] skipping invalid filter", { id, label: raw.label });
+    return null;
+  }
 
   const color =
     typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : DEFAULT_COLOR;
@@ -34,7 +39,7 @@ function normalizeFilter(raw, userId) {
     originLocations: Array.isArray(raw.originLocations) ? raw.originLocations.map(String).filter(Boolean) : [],
     destLocations: Array.isArray(raw.destLocations) ? raw.destLocations.map(String).filter(Boolean) : [],
     excludedStates: Array.isArray(raw.excludedStates)
-      ? raw.excludedStates.map((s) => String(s).toUpperCase()).filter((s) => s.length === 2)
+      ? raw.excludedStates.map((s) => String(s).toUpperCase()).filter((s) => s.length >= 2).map((s) => s.slice(0, 2))
       : [],
     notifyOn: raw.notifyOn === "rate-increase" ? "rate-increase" : "any",
     color,
@@ -45,9 +50,9 @@ function normalizeFilter(raw, userId) {
 
 function toClientFilter(doc) {
   return {
-    id: doc.filterId ?? doc.id,
-    boardId: doc.boardId,
-    tabId: doc.tabId,
+    id: String(doc.filterId ?? doc.id),
+    boardId: doc.boardId ?? "dat-one",
+    tabId: doc.tabId ?? "*",
     label: doc.label,
     minDistanceMiles: doc.minDistanceMiles ?? null,
     maxDistanceMiles: doc.maxDistanceMiles ?? null,
@@ -63,11 +68,15 @@ function toClientFilter(doc) {
 }
 
 async function stampFiltersUpdatedAt(userId) {
-  const db = getDb();
-  await db.collection("users").updateOne(
-    { _id: new ObjectId(userId) },
-    { $set: { filtersUpdatedAt: new Date(), updatedAt: new Date() } }
-  );
+  try {
+    const db = getDb();
+    await db.collection("users").updateOne(
+      { _id: new ObjectId(String(userId)) },
+      { $set: { filtersUpdatedAt: new Date(), updatedAt: new Date() } }
+    );
+  } catch (error) {
+    console.warn("[savedFilters] failed to stamp filtersUpdatedAt", error);
+  }
 }
 
 export async function ensureFilterIndexes() {
@@ -78,11 +87,13 @@ export async function ensureFilterIndexes() {
 
 export async function listFiltersForUser(userId) {
   const db = getDb();
+  const uid = String(userId);
   const rows = await db
     .collection(COLLECTION)
-    .find({ userId: String(userId) })
+    .find({ userId: uid })
     .sort({ createdAt: 1 })
     .toArray();
+  console.log(`[savedFilters] list user=${uid} count=${rows.length}`);
   return rows.map(toClientFilter);
 }
 
@@ -108,5 +119,6 @@ export async function replaceFiltersForUser(userId, filters) {
   }
 
   await stampFiltersUpdatedAt(uid);
+  console.log(`[savedFilters] replace user=${uid} count=${normalized.length}`);
   return normalized.map(toClientFilter);
 }

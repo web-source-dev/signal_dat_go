@@ -47,8 +47,8 @@ router.post("/logout", async (req, res, next) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : req.cookies?.[SESSION_COOKIE_NAME];
 
-    // Logout everywhere: revoke every session for this user so other devices
-    // are signed out within the next session-refresh / API call.
+    // Always revoke this token, and if we can resolve the user, revoke every
+    // session so other devices are signed out immediately on next check.
     const user = token ? await validateSession(token) : null;
     if (user) {
       await revokeAllSessionsForUser(user.id);
@@ -61,6 +61,11 @@ router.post("/logout", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+/** Lightweight probe used by other devices to detect logout / ban quickly. */
+router.get("/session", requireSession, (req, res) => {
+  res.json({ ok: true, userId: req.user.id });
 });
 
 router.post("/dev-login", async (req, res, next) => {

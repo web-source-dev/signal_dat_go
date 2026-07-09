@@ -21,6 +21,19 @@ function normalizeTheme(value) {
   return value === "dark" || value === "system" ? value : "light";
 }
 
+function sanitizeTemplates(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((row) => row && typeof row === "object")
+    .map((row) => ({
+      id: String(row.id ?? "").trim(),
+      name: String(row.name ?? "").trim() || "Untitled",
+      subject: String(row.subject ?? ""),
+      body: String(row.body ?? ""),
+    }))
+    .filter((row) => row.id);
+}
+
 export async function getUserPreferences(userId) {
   const db = getDb();
   const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
@@ -36,13 +49,17 @@ export async function getUserPreferences(userId) {
         ? prefs.selectedFilterId
         : DEFAULTS.selectedFilterId,
     themePreference: normalizeTheme(prefs.themePreference ?? DEFAULTS.themePreference),
-    emailTemplates: Array.isArray(prefs.emailTemplates) ? prefs.emailTemplates : null,
+    emailTemplates: Array.isArray(prefs.emailTemplates) ? sanitizeTemplates(prefs.emailTemplates) : null,
     defaultSignature: typeof prefs.defaultSignature === "string" ? prefs.defaultSignature : null,
     defaultTemplateId: typeof prefs.defaultTemplateId === "string" ? prefs.defaultTemplateId : null,
     defaultTemplatePerTab:
       prefs.defaultTemplatePerTab && typeof prefs.defaultTemplatePerTab === "object"
         ? prefs.defaultTemplatePerTab
         : null,
+    preferencesUpdatedAt: user?.preferencesUpdatedAt
+      ? new Date(user.preferencesUpdatedAt).toISOString()
+      : null,
+    filtersUpdatedAt: user?.filtersUpdatedAt ? new Date(user.filtersUpdatedAt).toISOString() : null,
   };
 }
 
@@ -64,11 +81,7 @@ export async function setUserPreferences(userId, patch = {}) {
     themePreference:
       patch.themePreference === undefined ? current.themePreference : normalizeTheme(patch.themePreference),
     emailTemplates:
-      patch.emailTemplates === undefined
-        ? current.emailTemplates
-        : Array.isArray(patch.emailTemplates)
-          ? patch.emailTemplates
-          : null,
+      patch.emailTemplates === undefined ? current.emailTemplates : sanitizeTemplates(patch.emailTemplates),
     defaultSignature:
       patch.defaultSignature === undefined
         ? current.defaultSignature
@@ -89,16 +102,22 @@ export async function setUserPreferences(userId, patch = {}) {
           : null,
   };
 
+  const now = new Date();
   const db = getDb();
   await db.collection("users").updateOne(
     { _id: new ObjectId(userId) },
     {
       $set: {
         preferences: next,
-        updatedAt: new Date(),
+        preferencesUpdatedAt: now,
+        updatedAt: now,
       },
     }
   );
 
-  return next;
+  return {
+    ...next,
+    preferencesUpdatedAt: now.toISOString(),
+    filtersUpdatedAt: current.filtersUpdatedAt,
+  };
 }

@@ -25,6 +25,7 @@ import gmailAuthRoutes from "./src/routes/gmailAuth.js";
 import emailAccountsRoutes from "./src/routes/emailAccounts.js";
 import filtersRoutes from "./src/routes/filters.js";
 import preferencesRoutes from "./src/routes/preferences.js";
+import syncRoutes from "./src/routes/sync.js";
 import internalRoutes from "./src/routes/internal.js";
 
 const app = express();
@@ -63,6 +64,7 @@ app.use("/notifications", notificationsRoutes);
 app.use("/lookups", lookupsRoutes);
 app.use("/filters", filtersRoutes);
 app.use("/preferences", preferencesRoutes);
+app.use("/sync", syncRoutes);
 app.use("/internal", internalRoutes);
 
 app.use((err, _req, res, _next) => {

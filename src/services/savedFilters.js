@@ -1,7 +1,14 @@
+import { ObjectId } from "mongodb";
 import { getDb } from "../db/mongo.js";
 
 const COLLECTION = "savedFilters";
 const DEFAULT_COLOR = "#f7a84b";
+
+function toNumberOrNull(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
 
 function normalizeFilter(raw, userId) {
   if (!raw || typeof raw !== "object") return null;
@@ -12,6 +19,7 @@ function normalizeFilter(raw, userId) {
   const color =
     typeof raw.color === "string" && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : DEFAULT_COLOR;
 
+  const nowIso = new Date().toISOString();
   return {
     userId: String(userId),
     filterId: id,
@@ -19,16 +27,18 @@ function normalizeFilter(raw, userId) {
     boardId: String(raw.boardId ?? "dat-one"),
     tabId: String(raw.tabId ?? "*"),
     label,
-    minDistanceMiles: raw.minDistanceMiles == null ? null : Number(raw.minDistanceMiles),
-    maxDistanceMiles: raw.maxDistanceMiles == null ? null : Number(raw.maxDistanceMiles),
-    minRateTotal: raw.minRateTotal == null ? null : Number(raw.minRateTotal),
-    minRatePerMile: raw.minRatePerMile == null ? null : Number(raw.minRatePerMile),
-    originLocations: Array.isArray(raw.originLocations) ? raw.originLocations.map(String) : [],
-    destLocations: Array.isArray(raw.destLocations) ? raw.destLocations.map(String) : [],
-    excludedStates: Array.isArray(raw.excludedStates) ? raw.excludedStates.map(String) : [],
+    minDistanceMiles: toNumberOrNull(raw.minDistanceMiles),
+    maxDistanceMiles: toNumberOrNull(raw.maxDistanceMiles),
+    minRateTotal: toNumberOrNull(raw.minRateTotal),
+    minRatePerMile: toNumberOrNull(raw.minRatePerMile),
+    originLocations: Array.isArray(raw.originLocations) ? raw.originLocations.map(String).filter(Boolean) : [],
+    destLocations: Array.isArray(raw.destLocations) ? raw.destLocations.map(String).filter(Boolean) : [],
+    excludedStates: Array.isArray(raw.excludedStates)
+      ? raw.excludedStates.map((s) => String(s).toUpperCase()).filter((s) => s.length === 2)
+      : [],
     notifyOn: raw.notifyOn === "rate-increase" ? "rate-increase" : "any",
     color,
-    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
+    createdAt: typeof raw.createdAt === "string" && raw.createdAt ? raw.createdAt : nowIso,
     updatedAt: new Date(),
   };
 }
@@ -52,6 +62,14 @@ function toClientFilter(doc) {
   };
 }
 
+async function stampFiltersUpdatedAt(userId) {
+  const db = getDb();
+  await db.collection("users").updateOne(
+    { _id: new ObjectId(userId) },
+    { $set: { filtersUpdatedAt: new Date(), updatedAt: new Date() } }
+  );
+}
+
 export async function ensureFilterIndexes() {
   const db = getDb();
   await db.collection(COLLECTION).createIndex({ userId: 1, filterId: 1 }, { unique: true });
@@ -72,9 +90,15 @@ export async function listFiltersForUser(userId) {
 export async function replaceFiltersForUser(userId, filters) {
   const db = getDb();
   const uid = String(userId);
-  const normalized = (Array.isArray(filters) ? filters : [])
-    .map((row) => normalizeFilter(row, uid))
-    .filter(Boolean);
+  const seen = new Set();
+  const normalized = [];
+
+  for (const row of Array.isArray(filters) ? filters : []) {
+    const item = normalizeFilter(row, uid);
+    if (!item || seen.has(item.filterId)) continue;
+    seen.add(item.filterId);
+    normalized.push(item);
+  }
 
   const col = db.collection(COLLECTION);
   await col.deleteMany({ userId: uid });
@@ -83,5 +107,6 @@ export async function replaceFiltersForUser(userId, filters) {
     await col.insertMany(normalized);
   }
 
+  await stampFiltersUpdatedAt(uid);
   return normalized.map(toClientFilter);
 }

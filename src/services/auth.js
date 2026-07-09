@@ -138,7 +138,7 @@ export async function createSession(userId, userAgent) {
 
   await db.collection("sessions").insertOne({
     tokenHash,
-    userId,
+    userId: String(userId),
     userAgent: userAgent ?? null,
     expiresAt,
     createdAt: new Date(),
@@ -157,6 +157,13 @@ export async function revokeAllSessionsForUser(userId) {
   if (!userId) return;
   const db = getDb();
   await db.collection("sessions").deleteMany({ userId: String(userId) });
+}
+
+export async function ensureSessionIndexes() {
+  const db = getDb();
+  await db.collection("sessions").createIndex({ tokenHash: 1 }, { unique: true });
+  await db.collection("sessions").createIndex({ userId: 1 });
+  await db.collection("sessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 }
 
 export async function validateSession(token) {

@@ -23,6 +23,8 @@ import notificationsRoutes from "./src/routes/notifications.js";
 import lookupsRoutes from "./src/routes/lookups.js";
 import gmailAuthRoutes from "./src/routes/gmailAuth.js";
 import emailAccountsRoutes from "./src/routes/emailAccounts.js";
+import filtersRoutes from "./src/routes/filters.js";
+import preferencesRoutes from "./src/routes/preferences.js";
 import internalRoutes from "./src/routes/internal.js";
 
 const app = express();
@@ -59,6 +61,8 @@ app.use("/broker-insights", brokerInsightsRoutes);
 app.use("/ai", aiRoutes);
 app.use("/notifications", notificationsRoutes);
 app.use("/lookups", lookupsRoutes);
+app.use("/filters", filtersRoutes);
+app.use("/preferences", preferencesRoutes);
 app.use("/internal", internalRoutes);
 
 app.use((err, _req, res, _next) => {

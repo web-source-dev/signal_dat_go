@@ -4,7 +4,9 @@ import {
   createSession,
   findOrCreateUserByEmail,
   loginWithPassword,
+  revokeAllSessionsForUser,
   revokeSession,
+  validateSession,
 } from "../services/auth.js";
 import { requireSession } from "../middleware/session.js";
 
@@ -44,7 +46,16 @@ router.post("/logout", async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : req.cookies?.[SESSION_COOKIE_NAME];
-    await revokeSession(token);
+
+    // Logout everywhere: revoke every session for this user so other devices
+    // are signed out within the next session-refresh / API call.
+    const user = token ? await validateSession(token) : null;
+    if (user) {
+      await revokeAllSessionsForUser(user.id);
+    } else {
+      await revokeSession(token);
+    }
+
     res.clearCookie(SESSION_COOKIE_NAME);
     res.status(204).end();
   } catch (error) {

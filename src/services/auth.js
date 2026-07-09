@@ -130,6 +130,8 @@ export async function loginWithPassword(email, password) {
 
 export async function createSession(userId, userAgent) {
   const db = getDb();
+  await revokeAllSessionsForUser(userId);
+
   const token = randomBytes(32).toString("hex");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -149,6 +151,12 @@ export async function revokeSession(token) {
   if (!token) return;
   const db = getDb();
   await db.collection("sessions").deleteOne({ tokenHash: hashToken(token) });
+}
+
+export async function revokeAllSessionsForUser(userId) {
+  if (!userId) return;
+  const db = getDb();
+  await db.collection("sessions").deleteMany({ userId: String(userId) });
 }
 
 export async function validateSession(token) {

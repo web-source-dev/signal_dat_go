@@ -53,14 +53,27 @@ function apiUrl(path, webKey) {
 }
 
 async function fmcsaGet(path, webKey) {
-  const response = await proxyFetch(apiUrl(path, webKey), { headers: DEFAULT_HEADERS });
-  if (!response.ok) {
-    const err = new Error(`FMCSA API request failed: ${response.status} ${response.statusText}`);
-    err.status = response.status;
-    err.code = response.status === 403 ? "FMCSA_FORBIDDEN" : "FMCSA_UPSTREAM";
-    throw err;
+  const url = apiUrl(path, webKey);
+  console.log("[fmcsa] GET", path);
+  try {
+    const response = await proxyFetch(url, { headers: DEFAULT_HEADERS });
+    if (!response.ok) {
+      const err = new Error(`FMCSA API request failed: ${response.status} ${response.statusText}`);
+      err.status = response.status;
+      err.code = response.status === 403 ? "FMCSA_FORBIDDEN" : "FMCSA_UPSTREAM";
+      console.error("[fmcsa] upstream HTTP error", { path, status: response.status, statusText: response.statusText });
+      throw err;
+    }
+    return response.json();
+  } catch (error) {
+    console.error("[fmcsa] request failed", {
+      path,
+      message: error.message,
+      code: error.code,
+      cause: error.cause?.code || error.cause?.message || null,
+    });
+    throw error;
   }
-  return response.json();
 }
 
 function extractCarriers(data) {

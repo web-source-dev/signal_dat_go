@@ -67,10 +67,17 @@ app.use("/preferences", preferencesRoutes);
 app.use("/sync", syncRoutes);
 app.use("/internal", internalRoutes);
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
   const status = err.status ?? 500;
-  console.error("[cargosignal-api]", err);
-  res.status(status).json({ message: err.message ?? "Internal server error" });
+  console.error("[cargosignal-api] unhandled error", {
+    method: req.method,
+    path: req.originalUrl,
+    status,
+    message: err.message,
+    code: err.code,
+    stack: err.stack,
+  });
+  res.status(status).json({ message: err.message ?? "Internal server error", code: err.code || undefined });
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3005;

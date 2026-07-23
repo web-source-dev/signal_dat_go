@@ -118,26 +118,40 @@ function computeRisk(fmcsa, credit, phone = null, domain = null) {
 async function fetchFmcsaAuthority(identifier) {
   const webKey = getFmcsaWebKey();
   if (!webKey) {
-    return { data: null, note: "FMCSA_WEBKEY is not configured in apps/api/.env" };
+    return { data: null, note: "FMCSA_WEBKEY is not configured in apps/api/.env", transient: false };
   }
 
   try {
     if (identifier.mc) {
       const data = await fetchCarrierByMc(identifier.mc, webKey);
-      return { data, note: data ? null : "No FMCSA record found for this MC number." };
+      return { data, note: data ? null : "No FMCSA record found for this MC number.", transient: false };
     }
     const data = await fetchCarrierByName(identifier.name, webKey);
-    return { data, note: data ? null : `No FMCSA record found for "${identifier.name}".` };
+    return { data, note: data ? null : `No FMCSA record found for "${identifier.name}".`, transient: false };
   } catch (error) {
     const detail = error?.cause?.code || error?.cause?.message || error.message;
+    const transient =
+      error?.code === "PROXY_AUTH_REQUIRED" ||
+      error?.code === "PROXY_FETCH_FAILED" ||
+      error?.code === "PROXY_CONNECT_FAILED" ||
+      error?.code === "FMCSA_FORBIDDEN" ||
+      error?.status === 407 ||
+      error?.status === 403 ||
+      /proxy|CONNECT|ECONN|ETIMEDOUT|SSL|fetch failed/i.test(String(detail));
     const message =
-      error?.code === "FMCSA_FORBIDDEN"
-        ? "FMCSA blocked this server's region. Add working HTTP_PROXY_* settings to apps/api/.env."
-        : /407|PROXY_AUTHENTICATION|Proxy .* failed/i.test(String(detail))
-          ? `FMCSA lookup failed: US proxy auth/connection error (${detail}). Update HTTP_PROXY_* in apps/api/.env.`
+      error?.code === "FMCSA_FORBIDDEN" || error?.status === 403
+        ? "FMCSA blocked this server's region. Update HTTP_PROXY_* in apps/api/.env with a working US proxy."
+        : error?.code === "PROXY_AUTH_REQUIRED" || error?.status === 407
+          ? `FMCSA lookup failed: proxy auth rejected (${detail}). Your Webshare/Thordata proxy credentials are expired or this proxy IP is not in your account list.`
           : `FMCSA lookup failed: ${detail}`;
-    console.warn(`[broker-insights] FMCSA lookup failed for ${identifier.mc ?? identifier.name}`, error);
-    return { data: null, note: message };
+    console.error(`[broker-insights] FMCSA lookup failed for ${identifier.mc ?? identifier.name}`, {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      detail,
+      transient,
+    });
+    return { data: null, note: message, transient };
   }
 }
 
@@ -152,10 +166,15 @@ export async function getInsight(identifier, phoneNumber, brokerEmail) {
 
   let fmcsaNote = null;
   const missTtlMs = 60 * 60 * 1000;
-  const fmcsaTtl = profile?.fmcsaMiss ? missTtlMs : FMCSA_TTL_MS;
+  const transientTtlMs = 30 * 1000;
+  const fmcsaTtl = profile?.fmcsaTransient
+    ? transientTtlMs
+    : profile?.fmcsaMiss
+      ? missTtlMs
+      : FMCSA_TTL_MS;
 
   if (isStale(profile?.fmcsaFetchedAt, fmcsaTtl)) {
-    const { data: fmcsaData, note } = await fetchFmcsaAuthority(identifier);
+    const { data: fmcsaData, note, transient } = await fetchFmcsaAuthority(identifier);
     fmcsaNote = note;
     await coll.updateOne(
       { mcNumber },
@@ -164,7 +183,8 @@ export async function getInsight(identifier, phoneNumber, brokerEmail) {
           fmcsaData,
           fmcsaFetchedAt: now,
           fmcsaNote: note,
-          fmcsaMiss: !fmcsaData,
+          fmcsaMiss: !fmcsaData && !transient,
+          fmcsaTransient: Boolean(transient),
         },
         $setOnInsert: { mcNumber, createdAt: now },
       },

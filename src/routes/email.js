@@ -171,14 +171,28 @@ async function resolveSendAccount(userId, body) {
     if (account && account.status !== "ERROR") return account;
   }
 
-  const provider = body.provider === "SMTP" ? "SMTP" : body.provider === "OUTLOOK" ? "OUTLOOK" : "GMAIL";
-  const tokens = await connectedAccounts.getDecryptedTokens(userId, provider);
-  if (!tokens?.accountId) {
-    const err = new Error(`No connected ${provider} account — connect a mailbox in Account first`);
-    err.status = 400;
-    throw err;
+  const preferred =
+    body.provider === "SMTP" ? "SMTP" : body.provider === "OUTLOOK" ? "OUTLOOK" : body.provider === "GMAIL" ? "GMAIL" : null;
+
+  // Prefer an account matching the requested provider, then any active mailbox
+  // (SMTP users were failing when the client still defaulted to GMAIL).
+  const all = await connectedAccounts.listForUser(userId);
+  const active = all.filter((row) => row.status !== "ERROR");
+  if (preferred) {
+    const match = active.find((row) => row.provider === preferred);
+    if (match) {
+      const account = await connectedAccounts.getAccountById(userId, match.id);
+      if (account) return account;
+    }
   }
-  return connectedAccounts.getAccountById(userId, tokens.accountId);
+  if (active[0]) {
+    const account = await connectedAccounts.getAccountById(userId, active[0].id);
+    if (account) return account;
+  }
+
+  const err = new Error("No connected mailbox — connect Gmail, Outlook, or SMTP in Account first");
+  err.status = 400;
+  throw err;
 }
 
 router.post("/send", requireSession, async (req, res, next) => {

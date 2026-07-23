@@ -129,9 +129,13 @@ async function fetchFmcsaAuthority(identifier) {
     const data = await fetchCarrierByName(identifier.name, webKey);
     return { data, note: data ? null : `No FMCSA record found for "${identifier.name}".` };
   } catch (error) {
-    const message = error?.code === "FMCSA_FORBIDDEN"
-      ? "FMCSA blocked this server's region. Add HTTP_PROXY_* settings to apps/api/.env (see Loadline backend/.env)."
-      : `FMCSA lookup failed: ${error.message}`;
+    const detail = error?.cause?.code || error?.cause?.message || error.message;
+    const message =
+      error?.code === "FMCSA_FORBIDDEN"
+        ? "FMCSA blocked this server's region. Add working HTTP_PROXY_* settings to apps/api/.env."
+        : /407|PROXY_AUTHENTICATION|Proxy .* failed/i.test(String(detail))
+          ? `FMCSA lookup failed: US proxy auth/connection error (${detail}). Update HTTP_PROXY_* in apps/api/.env.`
+          : `FMCSA lookup failed: ${detail}`;
     console.warn(`[broker-insights] FMCSA lookup failed for ${identifier.mc ?? identifier.name}`, error);
     return { data: null, note: message };
   }

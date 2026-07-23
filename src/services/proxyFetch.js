@@ -72,8 +72,13 @@ export async function proxyFetch(url, options = {}) {
 
       return res;
     } catch (err) {
-      console.warn("[proxyFetch] %s error: %s", proxy.label, err.message);
-      lastError = err;
+      const cause = err?.cause;
+      const detail = cause?.code || cause?.message || err.message;
+      console.warn("[proxyFetch] %s error: %s", proxy.label, detail);
+      lastError = Object.assign(new Error(`Proxy ${proxy.label} failed: ${detail}`), {
+        cause: err,
+        code: cause?.code || "PROXY_FETCH_FAILED",
+      });
     }
   }
 

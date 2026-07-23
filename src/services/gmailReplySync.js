@@ -3,6 +3,7 @@ import * as connectedAccounts from "./connectedAccounts.js";
 import * as gmail from "./gmail.js";
 import { listAwaitingReply, recordReply } from "./outreach.js";
 import { publishNotification } from "./notifications.js";
+import { maybeAutoAiReply } from "./autoAiReply.js";
 
 let syncTimer = null;
 
@@ -23,6 +24,17 @@ export async function syncGmailRepliesForUser(userId) {
 
     const result = await recordReply(String(thread._id), reply);
     if (!result) continue;
+
+    void maybeAutoAiReply({
+      userId: result.userId,
+      outreachThreadId: result.outreachThreadId,
+      reply: {
+        providerMessageId: reply.providerMessageId,
+        fromAddress: reply.fromAddress,
+        snippet: reply.snippet,
+        receivedAt: reply.receivedAt,
+      },
+    });
 
     publishNotification(userId, {
       type: "NEW_REPLY",

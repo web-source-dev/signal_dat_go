@@ -16,10 +16,11 @@ function getOpenRouterConfig() {
 function buildConversationTranscript(conversation) {
   if (!Array.isArray(conversation) || conversation.length === 0) return null;
   return conversation
-    .filter((message) => message?.text)
+    .filter((message) => message?.text || message?.content)
     .map((message) => {
       const speaker = message.role === "you" ? "You (dispatcher)" : "Broker";
-      return `${speaker}: ${String(message.text).trim()}`;
+      const text = String(message.text ?? message.content ?? "").trim();
+      return `${speaker}: ${text}`;
     })
     .join("\n");
 }
@@ -159,7 +160,9 @@ export async function suggestReply(input) {
       ? "Draft the dispatcher's next reply to the broker based on the full conversation below."
       : "Draft a short, direct reply to the broker's email below.",
     TONE_INSTRUCTIONS[tone] ?? TONE_INSTRUCTIONS.professional,
-    "If the broker asked for information you don't have (like an MC number, rate, or documents), acknowledge the request and say you will provide it, using a placeholder like [MC number] the dispatcher can fill in.",
+    input.autoSend
+      ? "This reply will be sent automatically. Do NOT use bracket placeholders like [MC number]. Only state facts you know from the conversation/load context, or ask a short clarifying question."
+      : "If the broker asked for information you don't have (like an MC number, rate, or documents), acknowledge the request and say you will provide it, using a placeholder like [MC number] the dispatcher can fill in.",
     "Reply with the email body only - no subject line, no signature, no commentary.",
   ].join(" ");
 

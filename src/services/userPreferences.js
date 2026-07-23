@@ -3,6 +3,7 @@ import { getDb } from "../db/mongo.js";
 
 const DEFAULTS = {
   autoReachEnabled: false,
+  autoAiReplyEnabled: false,
   matchDisplayMode: "highlight",
   hideCanceledLoads: true,
   selectedFilterId: "__all__",
@@ -41,6 +42,7 @@ export async function getUserPreferences(userId) {
 
   return {
     autoReachEnabled: Boolean(prefs.autoReachEnabled ?? DEFAULTS.autoReachEnabled),
+    autoAiReplyEnabled: Boolean(prefs.autoAiReplyEnabled ?? DEFAULTS.autoAiReplyEnabled),
     matchDisplayMode: normalizeMatchDisplayMode(prefs.matchDisplayMode ?? DEFAULTS.matchDisplayMode),
     hideCanceledLoads:
       prefs.hideCanceledLoads === undefined ? DEFAULTS.hideCanceledLoads : Boolean(prefs.hideCanceledLoads),
@@ -68,6 +70,8 @@ export async function setUserPreferences(userId, patch = {}) {
   const next = {
     autoReachEnabled:
       patch.autoReachEnabled === undefined ? current.autoReachEnabled : Boolean(patch.autoReachEnabled),
+    autoAiReplyEnabled:
+      patch.autoAiReplyEnabled === undefined ? current.autoAiReplyEnabled : Boolean(patch.autoAiReplyEnabled),
     matchDisplayMode:
       patch.matchDisplayMode === undefined
         ? current.matchDisplayMode

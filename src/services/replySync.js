@@ -5,6 +5,7 @@ import * as outlook from "./outlook.js";
 import { getSmtpBrokerReplies } from "./smtpImap.js";
 import { listThreadsForProvider, recordReply } from "./outreach.js";
 import { publishNotification } from "./notifications.js";
+import { maybeAutoAiReply } from "./autoAiReply.js";
 
 async function ingestReplies(thread, replies) {
   let recorded = 0;
@@ -14,6 +15,16 @@ async function ingestReplies(thread, replies) {
     if (!result) continue;
     recorded += 1;
     lastResult = result;
+    void maybeAutoAiReply({
+      userId: result.userId,
+      outreachThreadId: result.outreachThreadId,
+      reply: {
+        providerMessageId: reply.providerMessageId,
+        fromAddress: reply.fromAddress,
+        snippet: reply.snippet,
+        receivedAt: reply.receivedAt,
+      },
+    });
   }
   if (lastResult) {
     publishNotification(lastResult.userId, {

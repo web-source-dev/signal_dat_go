@@ -2,13 +2,12 @@ import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { requireSession, rememberOAuthSession } from "../middleware/session.js";
 import * as connectedAccounts from "../services/connectedAccounts.js";
-import * as outreach from "../services/outreach.js";
-import * as gmail from "../services/gmail.js";
 import * as outlook from "../services/outlook.js";
 import * as smtp from "../services/smtp.js";
 import { inferImapFromSmtp } from "../services/smtpImap.js";
 import { verifyImapConnection } from "../services/smtpImapVerify.js";
 import { completeGmailOAuth, startGmailOAuth } from "../handlers/gmailOAuth.js";
+import { sendOutboundEmail } from "../services/outboundEmail.js";
 
 const router = Router();
 const OAUTH_STATE_COOKIE = "cs_oauth_state";
@@ -152,49 +151,6 @@ router.delete("/smtp/disconnect", requireSession, async (req, res, next) => {
   }
 });
 
-async function resolveSendAccount(userId, body) {
-  const accountId = body.accountId ? String(body.accountId) : null;
-  if (accountId) {
-    const account = await connectedAccounts.getAccountById(userId, accountId);
-    if (!account || account.status === "ERROR") {
-      const err = new Error("Selected mailbox is not connected");
-      err.status = 400;
-      throw err;
-    }
-    return account;
-  }
-
-  const { getEmailPreferences } = await import("../services/emailPreferences.js");
-  const prefs = await getEmailPreferences(userId);
-  if (prefs.defaultEmailAccountId) {
-    const account = await connectedAccounts.getAccountById(userId, prefs.defaultEmailAccountId);
-    if (account && account.status !== "ERROR") return account;
-  }
-
-  const preferred =
-    body.provider === "SMTP" ? "SMTP" : body.provider === "OUTLOOK" ? "OUTLOOK" : body.provider === "GMAIL" ? "GMAIL" : null;
-
-  // Prefer an account matching the requested provider, then any active mailbox
-  // (SMTP users were failing when the client still defaulted to GMAIL).
-  const all = await connectedAccounts.listForUser(userId);
-  const active = all.filter((row) => row.status !== "ERROR");
-  if (preferred) {
-    const match = active.find((row) => row.provider === preferred);
-    if (match) {
-      const account = await connectedAccounts.getAccountById(userId, match.id);
-      if (account) return account;
-    }
-  }
-  if (active[0]) {
-    const account = await connectedAccounts.getAccountById(userId, active[0].id);
-    if (account) return account;
-  }
-
-  const err = new Error("No connected mailbox — connect Gmail, Outlook, or SMTP in Account first");
-  err.status = 400;
-  throw err;
-}
-
 router.post("/send", requireSession, async (req, res, next) => {
   try {
     const body = req.body ?? {};
@@ -202,53 +158,7 @@ router.post("/send", requireSession, async (req, res, next) => {
       return res.status(400).json({ message: "to, subject, and bodyHtml are required" });
     }
 
-    const account = await resolveSendAccount(req.user.id, body);
-    const provider = account.provider;
-    let result;
-
-    if (provider === "SMTP") {
-      const config = await connectedAccounts.getSmtpConfig(req.user.id, String(account._id));
-      if (!config) {
-        return res.status(400).json({
-          message: "No SMTP account connected — connect your mailbox manually in Account first",
-        });
-      }
-      result = await smtp.sendSmtpEmail(config, {
-        to: body.to,
-        subject: body.subject,
-        bodyHtml: body.bodyHtml,
-        inReplyToMessageId: body.inReplyToMessageId ?? null,
-      });
-    } else {
-      const tokens =
-        provider === "GMAIL"
-          ? await connectedAccounts.getValidGmailTokens(req.user.id, null, String(account._id))
-          : await connectedAccounts.getDecryptedTokensForAccount(req.user.id, String(account._id));
-      if (!tokens) {
-        return res.status(400).json({
-          message: `No connected ${provider} account — connect Gmail or Outlook in Account first`,
-        });
-      }
-
-      result =
-        provider === "GMAIL"
-          ? await gmail.sendGmailEmail(tokens.accessToken, tokens.refreshToken, tokens.providerAccountEmail ?? "", body)
-          : await outlook.sendOutlookEmail(tokens.accessToken, tokens.refreshToken, body);
-    }
-
-    const thread = await outreach.recordSentEmail(req.user.id, {
-      loadRef: body.loadRef ?? null,
-      outreachThreadId: body.outreachThreadId ?? null,
-      provider,
-      connectedAccountId: String(account._id),
-      providerThreadId: result.providerThreadId,
-      providerMessageId: result.providerMessageId,
-      subject: body.subject,
-      brokerEmail: body.to,
-      bodySnippet: body.bodyHtml.replace(/<[^>]+>/g, "").slice(0, 280),
-      aiGenerated: body.aiGenerated ?? false,
-    });
-
+    const { thread } = await sendOutboundEmail(req.user.id, body);
     res.json(thread);
   } catch (error) {
     next(error);

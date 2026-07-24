@@ -1,12 +1,15 @@
 import { ObjectId } from "mongodb";
 import { getDb } from "../db/mongo.js";
 
+const ALL_FILTERS = "__all__";
+
 const DEFAULTS = {
   autoReachEnabled: false,
   autoAiReplyEnabled: false,
   matchDisplayMode: "highlight",
   hideCanceledLoads: true,
-  selectedFilterId: "__all__",
+  selectedFilterIds: [],
+  selectedFilterId: ALL_FILTERS,
   themePreference: "light",
   emailTemplates: null,
   defaultSignature: null,
@@ -35,10 +38,35 @@ function sanitizeTemplates(value) {
     .filter((row) => row.id);
 }
 
+function normalizeSelectedFilterIds(value, legacyId) {
+  if (Array.isArray(value)) {
+    return [
+      ...new Set(
+        value
+          .filter((id) => typeof id === "string")
+          .map((id) => String(id).trim())
+          .filter((id) => id.length > 0 && id !== ALL_FILTERS)
+      ),
+    ];
+  }
+  if (typeof legacyId === "string" && legacyId && legacyId !== ALL_FILTERS) {
+    return [legacyId];
+  }
+  return [];
+}
+
+function selectedFilterIdFromIds(ids) {
+  if (!ids.length) return ALL_FILTERS;
+  if (ids.length === 1) return ids[0];
+  return ALL_FILTERS;
+}
+
 export async function getUserPreferences(userId) {
   const db = getDb();
   const user = await db.collection("users").findOne({ _id: new ObjectId(userId) });
   const prefs = user?.preferences ?? {};
+
+  const selectedFilterIds = normalizeSelectedFilterIds(prefs.selectedFilterIds, prefs.selectedFilterId);
 
   return {
     autoReachEnabled: Boolean(prefs.autoReachEnabled ?? DEFAULTS.autoReachEnabled),
@@ -46,10 +74,8 @@ export async function getUserPreferences(userId) {
     matchDisplayMode: normalizeMatchDisplayMode(prefs.matchDisplayMode ?? DEFAULTS.matchDisplayMode),
     hideCanceledLoads:
       prefs.hideCanceledLoads === undefined ? DEFAULTS.hideCanceledLoads : Boolean(prefs.hideCanceledLoads),
-    selectedFilterId:
-      typeof prefs.selectedFilterId === "string" && prefs.selectedFilterId
-        ? prefs.selectedFilterId
-        : DEFAULTS.selectedFilterId,
+    selectedFilterIds,
+    selectedFilterId: selectedFilterIdFromIds(selectedFilterIds),
     themePreference: normalizeTheme(prefs.themePreference ?? DEFAULTS.themePreference),
     emailTemplates: Array.isArray(prefs.emailTemplates) ? sanitizeTemplates(prefs.emailTemplates) : null,
     defaultSignature: typeof prefs.defaultSignature === "string" ? prefs.defaultSignature : null,
@@ -67,6 +93,15 @@ export async function getUserPreferences(userId) {
 
 export async function setUserPreferences(userId, patch = {}) {
   const current = await getUserPreferences(userId);
+
+  let selectedFilterIds = current.selectedFilterIds;
+  if (patch.selectedFilterIds !== undefined) {
+    selectedFilterIds = normalizeSelectedFilterIds(patch.selectedFilterIds, null);
+  } else if (patch.selectedFilterId !== undefined) {
+    const legacy = String(patch.selectedFilterId || ALL_FILTERS);
+    selectedFilterIds = legacy === ALL_FILTERS ? [] : normalizeSelectedFilterIds([legacy], null);
+  }
+
   const next = {
     autoReachEnabled:
       patch.autoReachEnabled === undefined ? current.autoReachEnabled : Boolean(patch.autoReachEnabled),
@@ -78,10 +113,8 @@ export async function setUserPreferences(userId, patch = {}) {
         : normalizeMatchDisplayMode(patch.matchDisplayMode),
     hideCanceledLoads:
       patch.hideCanceledLoads === undefined ? current.hideCanceledLoads : Boolean(patch.hideCanceledLoads),
-    selectedFilterId:
-      patch.selectedFilterId === undefined
-        ? current.selectedFilterId
-        : String(patch.selectedFilterId || "__all__"),
+    selectedFilterIds,
+    selectedFilterId: selectedFilterIdFromIds(selectedFilterIds),
     themePreference:
       patch.themePreference === undefined ? current.themePreference : normalizeTheme(patch.themePreference),
     emailTemplates:

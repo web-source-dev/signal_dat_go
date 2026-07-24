@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireSession } from "../middleware/session.js";
 import { lookupDomain } from "../services/domainIntel.js";
-import { fetchCarrierByMc, fetchCarriersByName, getFmcsaWebKey } from "../services/fmcsa.js";
+import { fetchCarrierByMc, fetchCarriersByName, getFmcsaWebKey, normalizeMcNumber } from "../services/fmcsa.js";
 
 const router = Router();
 
@@ -44,9 +44,10 @@ router.get("/carriers/search", async (req, res) => {
     const webKey = getFmcsaWebKey();
     if (!webKey) return res.status(503).json({ message: "FMCSA is not configured" });
 
-    if (/^\d+$/.test(query.replace(/\D/g, ""))) {
-      const carrier = await fetchCarrierByMc(query, webKey);
-      console.log("[lookups] MC result", { query, found: Boolean(carrier), name: carrier?.legalName ?? null });
+    const mc = normalizeMcNumber(query);
+    if (mc) {
+      const carrier = await fetchCarrierByMc(mc, webKey);
+      console.log("[lookups] MC result", { query, mc, found: Boolean(carrier), name: carrier?.legalName ?? null });
       return res.json(carrier ? [carrier] : []);
     }
 

@@ -121,6 +121,24 @@ function extractCarriers(data) {
   return entries.map((entry) => entry?.carrier).filter(Boolean);
 }
 
+/**
+ * Normalize user/board MC input to digits only.
+ * Accepts: "123456", "MC123456", "MC 123456", "mc-#123456".
+ * Returns null when the string is not an MC-style query (so names with digits stay name searches).
+ */
+export function normalizeMcNumber(input) {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return null;
+
+  const prefixed = trimmed.match(/^MC[\s#.\-]*(\d{4,8})$/i);
+  if (prefixed?.[1]) return prefixed[1];
+
+  // Digits only (optional leading zeros). Reject if any letters remain.
+  if (/^\d{4,8}$/.test(trimmed)) return trimmed.replace(/^0+/, "") || trimmed;
+
+  return null;
+}
+
 /** Build search variants from a messy DAT company cell (slashes, emails, suffixes). */
 export function buildNameSearchCandidates(companyName) {
   const cleaned = String(companyName || "")
@@ -143,7 +161,7 @@ export function buildNameSearchCandidates(companyName) {
 }
 
 export async function fetchCarrierByMc(mcNumber, webKey) {
-  const docketDigits = String(mcNumber).replace(/\D/g, "");
+  const docketDigits = normalizeMcNumber(mcNumber);
   if (!docketDigits) return null;
   const data = await fmcsaGet(`carriers/docket-number/${encodeURIComponent(docketDigits)}`, webKey);
   const carrier = extractCarriers(data)[0];

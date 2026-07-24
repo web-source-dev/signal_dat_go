@@ -1,6 +1,6 @@
 import { getDb } from "../db/mongo.js";
 import { lookupDomain } from "./domainIntel.js";
-import { fetchCarrierByMc, fetchCarrierByName, getFmcsaWebKey } from "./fmcsa.js";
+import { fetchCarrierByMc, fetchCarrierByName, getFmcsaWebKey, normalizeMcNumber } from "./fmcsa.js";
 
 const FMCSA_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -158,7 +158,16 @@ async function fetchFmcsaAuthority(identifier) {
 }
 
 export async function getInsight(identifier, phoneNumber, brokerEmail) {
-  const mcNumber = identifier.mc ?? `name:${slugify(identifier.name ?? brokerEmail ?? "unknown")}`;
+  const normalizedMc = normalizeMcNumber(identifier?.mc);
+  const resolvedIdentifier = {
+    mc: normalizedMc,
+    name: identifier?.name ? String(identifier.name).trim() : null,
+  };
+  if (!resolvedIdentifier.mc && !resolvedIdentifier.name && !brokerEmail) {
+    throw Object.assign(new Error("mc, name, or email is required"), { status: 400 });
+  }
+
+  const mcNumber = resolvedIdentifier.mc ?? `name:${slugify(resolvedIdentifier.name ?? brokerEmail ?? "unknown")}`;
   const now = new Date();
   const db = getDb();
   const coll = db.collection("brokerProfiles");
@@ -176,7 +185,7 @@ export async function getInsight(identifier, phoneNumber, brokerEmail) {
       : FMCSA_TTL_MS;
 
   if (isStale(profile?.fmcsaFetchedAt, fmcsaTtl)) {
-    const { data: fmcsaData, note, transient } = await fetchFmcsaAuthority(identifier);
+    const { data: fmcsaData, note, transient } = await fetchFmcsaAuthority(resolvedIdentifier);
     fmcsaNote = note;
     await coll.updateOne(
       { mcNumber },
@@ -223,7 +232,7 @@ export async function getInsight(identifier, phoneNumber, brokerEmail) {
   const domains = domainName ? [domainName] : [];
 
   return {
-    mcNumber: fmcsa?.mcNumber ?? identifier.mc ?? mcNumber,
+    mcNumber: fmcsa?.mcNumber ?? resolvedIdentifier.mc ?? mcNumber,
     dotNumber: fmcsa?.dotNumber ?? profile?.dotNumber ?? null,
     company: fmcsa
       ? {

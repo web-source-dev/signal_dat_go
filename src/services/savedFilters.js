@@ -44,6 +44,7 @@ function normalizeFilter(raw, userId) {
       : [],
     notifyOn: raw.notifyOn === "rate-increase" ? "rate-increase" : "any",
     color,
+    highlightRows: raw.highlightRows === false ? false : true,
     autoReachEnabled: raw.autoReachEnabled === false ? false : true,
     templateId:
       typeof raw.templateId === "string" && raw.templateId.trim() ? String(raw.templateId).trim() : null,
@@ -68,6 +69,7 @@ function toClientFilter(doc) {
     excludedStates: doc.excludedStates ?? [],
     notifyOn: doc.notifyOn === "rate-increase" ? "rate-increase" : "any",
     color: doc.color ?? DEFAULT_COLOR,
+    highlightRows: doc.highlightRows === false ? false : true,
     autoReachEnabled: doc.autoReachEnabled === false ? false : true,
     templateId:
       typeof doc.templateId === "string" && doc.templateId.trim() ? String(doc.templateId).trim() : null,

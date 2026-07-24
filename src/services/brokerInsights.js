@@ -143,7 +143,9 @@ async function fetchFmcsaAuthority(identifier) {
         ? "FMCSA blocked this server's region. Update HTTP_PROXY_* in apps/api/.env with a working US proxy."
         : error?.code === "PROXY_AUTH_REQUIRED" || error?.status === 407
           ? `FMCSA lookup failed: proxy auth rejected (${detail}). Your Webshare/Thordata proxy credentials are expired or this proxy IP is not in your account list.`
-          : `FMCSA lookup failed: ${detail}`;
+          : error?.code === "FMCSA_BAD_JSON"
+            ? "FMCSA lookup failed: proxy returned a malformed response. Restart the API after the latest fix and try Clear + lookup again."
+            : `FMCSA lookup failed: ${detail}`;
     console.error(`[broker-insights] FMCSA lookup failed for ${identifier.mc ?? identifier.name}`, {
       message: error.message,
       code: error.code,

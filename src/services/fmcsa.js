@@ -57,14 +57,20 @@ async function fmcsaGet(path, webKey) {
   console.log("[fmcsa] GET", path);
   try {
     const response = await proxyFetch(url, { headers: DEFAULT_HEADERS });
+    const text = await response.text();
     if (!response.ok) {
       const err = new Error(`FMCSA API request failed: ${response.status} ${response.statusText}`);
       err.status = response.status;
       err.code = response.status === 403 ? "FMCSA_FORBIDDEN" : "FMCSA_UPSTREAM";
-      console.error("[fmcsa] upstream HTTP error", { path, status: response.status, statusText: response.statusText });
+      console.error("[fmcsa] upstream HTTP error", {
+        path,
+        status: response.status,
+        statusText: response.statusText,
+        bodyPreview: text.slice(0, 180).replace(/\s+/g, " "),
+      });
       throw err;
     }
-    return response.json();
+    return parseFmcsaJson(text, path);
   } catch (error) {
     console.error("[fmcsa] request failed", {
       path,
@@ -73,6 +79,40 @@ async function fmcsaGet(path, webKey) {
       cause: error.cause?.code || error.cause?.message || null,
     });
     throw error;
+  }
+}
+
+function parseFmcsaJson(text, path) {
+  const raw = String(text ?? "").replace(/^\uFEFF/, "").trim();
+  if (!raw) {
+    const err = new Error("FMCSA returned an empty response");
+    err.code = "FMCSA_BAD_JSON";
+    throw err;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (firstError) {
+    // Some proxies/WAF wrappers leave junk around a JSON object.
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        const parsed = JSON.parse(raw.slice(start, end + 1));
+        console.warn("[fmcsa] recovered JSON payload from noisy body", { path });
+        return parsed;
+      } catch {
+        /* fall through */
+      }
+    }
+    console.error("[fmcsa] JSON parse failed", {
+      path,
+      message: firstError.message,
+      bodyPreview: raw.slice(0, 220).replace(/\s+/g, " "),
+    });
+    const err = new Error(`FMCSA returned invalid JSON (${firstError.message})`);
+    err.code = "FMCSA_BAD_JSON";
+    err.cause = firstError;
+    throw err;
   }
 }
 

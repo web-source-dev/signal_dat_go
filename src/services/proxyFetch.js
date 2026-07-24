@@ -187,6 +187,44 @@ function headersToObject(headers = {}) {
   return out;
 }
 
+/** Decode HTTP/1.1 chunked transfer body into raw bytes. */
+function decodeChunkedBody(buf) {
+  const chunks = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const lineEnd = buf.indexOf("\r\n", offset);
+    if (lineEnd < 0) break;
+    const sizeLine = buf.subarray(offset, lineEnd).toString("utf8").split(";", 1)[0].trim();
+    const size = Number.parseInt(sizeLine, 16);
+    if (!Number.isFinite(size) || size < 0) {
+      throw Object.assign(new Error(`Invalid chunk size: ${sizeLine}`), { code: "BAD_CHUNKED_BODY" });
+    }
+    offset = lineEnd + 2;
+    if (size === 0) break;
+    if (offset + size > buf.length) {
+      throw Object.assign(new Error("Truncated chunked body"), { code: "TRUNCATED_CHUNKED_BODY" });
+    }
+    chunks.push(buf.subarray(offset, offset + size));
+    offset += size + 2; // skip chunk data + trailing CRLF
+  }
+  return Buffer.concat(chunks);
+}
+
+function decodeHttpBody(bodyBuf, responseHeaders) {
+  const encoding = String(responseHeaders["transfer-encoding"] || "").toLowerCase();
+  if (encoding.includes("chunked")) {
+    return decodeChunkedBody(bodyBuf);
+  }
+  const lengthHeader = responseHeaders["content-length"];
+  if (lengthHeader != null && lengthHeader !== "") {
+    const length = Number.parseInt(String(lengthHeader), 10);
+    if (Number.isFinite(length) && length >= 0) {
+      return bodyBuf.subarray(0, Math.min(length, bodyBuf.length));
+    }
+  }
+  return bodyBuf;
+}
+
 /** HTTPS GET/POST through an established CONNECT socket. */
 function httpsOverSocket(socket, url, options = {}) {
   const parsed = new URL(url);
@@ -209,9 +247,6 @@ function httpsOverSocket(socket, url, options = {}) {
           .map(([key, value]) => `${key}: ${value}`)
           .join("\r\n");
         const body = options.body ? String(options.body) : "";
-        if (body && !headers["Content-Length"] && !headers["content-length"]) {
-          // length computed below
-        }
         const contentLength = Buffer.byteLength(body);
         const payload =
           `${method} ${parsed.pathname}${parsed.search} HTTP/1.1\r\n` +
@@ -229,31 +264,36 @@ function httpsOverSocket(socket, url, options = {}) {
       raw = Buffer.concat([raw, chunk]);
     });
     secure.on("end", () => {
-      const splitAt = raw.indexOf("\r\n\r\n");
-      if (splitAt < 0) {
-        reject(Object.assign(new Error("Invalid HTTP response via proxy"), { code: "BAD_UPSTREAM_RESPONSE" }));
-        return;
+      try {
+        const splitAt = raw.indexOf("\r\n\r\n");
+        if (splitAt < 0) {
+          reject(Object.assign(new Error("Invalid HTTP response via proxy"), { code: "BAD_UPSTREAM_RESPONSE" }));
+          return;
+        }
+        const head = raw.subarray(0, splitAt).toString("utf8");
+        const bodyBuf = raw.subarray(splitAt + 4);
+        const lines = head.split("\r\n");
+        const statusLine = lines[0] || "";
+        const match = /^HTTP\/\d(?:\.\d)?\s+(\d{3})\s*(.*)$/i.exec(statusLine);
+        const status = match ? Number(match[1]) : 502;
+        const statusText = match ? match[2] : "";
+        const responseHeaders = {};
+        for (const line of lines.slice(1)) {
+          const idx = line.indexOf(":");
+          if (idx < 0) continue;
+          responseHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+        }
+        const decodedBody = decodeHttpBody(bodyBuf, responseHeaders);
+        resolve(
+          new Response(decodedBody, {
+            status,
+            statusText,
+            headers: responseHeaders,
+          })
+        );
+      } catch (err) {
+        reject(err);
       }
-      const head = raw.subarray(0, splitAt).toString("utf8");
-      const bodyBuf = raw.subarray(splitAt + 4);
-      const lines = head.split("\r\n");
-      const statusLine = lines[0] || "";
-      const match = /^HTTP\/\d(?:\.\d)?\s+(\d{3})\s*(.*)$/i.exec(statusLine);
-      const status = match ? Number(match[1]) : 502;
-      const statusText = match ? match[2] : "";
-      const responseHeaders = {};
-      for (const line of lines.slice(1)) {
-        const idx = line.indexOf(":");
-        if (idx < 0) continue;
-        responseHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
-      }
-      resolve(
-        new Response(bodyBuf, {
-          status,
-          statusText,
-          headers: responseHeaders,
-        })
-      );
     });
     secure.on("timeout", () => {
       secure.destroy();
